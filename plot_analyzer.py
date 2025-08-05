@@ -66,6 +66,13 @@ class PlotAnalyzer:
         # Find plot numbers associated with original plots
         plot_numbers = self._find_plot_numbers_near_entities(original_entities)
         
+        # Assign plot numbers to individual entities
+        for i, entity_data in enumerate(original_entities):
+            if i < len(plot_numbers):
+                entity_data['plot_number'] = plot_numbers[i]
+            else:
+                entity_data['plot_number'] = f"Plot_{i+1}"
+        
         # Convert to square meters
         area_sq_meters = total_area * (self.scale_factor ** 2)
         perimeter_meters = total_perimeter * self.scale_factor
@@ -118,6 +125,13 @@ class PlotAnalyzer:
         
         # Find plot numbers associated with final plots
         plot_numbers = self._find_plot_numbers_near_entities(final_entities)
+        
+        # Assign plot numbers to individual entities
+        for i, entity_data in enumerate(final_entities):
+            if i < len(plot_numbers):
+                entity_data['plot_number'] = plot_numbers[i]
+            else:
+                entity_data['plot_number'] = f"Plot_{i+1}"
         
         # Convert to square meters
         area_sq_meters = total_area * (self.scale_factor ** 2)
@@ -549,7 +563,8 @@ class PlotAnalyzer:
             print("-" * 120)
             
             for i, plot in enumerate(original_result['entities']):
-                plot_num = f"Plot_{i+1}"  # Default if no plot number found
+                # Use actual plot number if available, otherwise use index
+                plot_num = plot.get('plot_number', f"Plot_{i+1}")
                 print(f"{i+1:<6} {plot_num:<12} {plot['area'] * (self.scale_factor ** 2):<15.2f} "
                       f"{plot['perimeter'] * self.scale_factor:<15.2f} {plot['type']:<12} {plot['layer']:<20}")
             
@@ -564,7 +579,8 @@ class PlotAnalyzer:
             print("-" * 120)
             
             for i, plot in enumerate(final_result['entities']):
-                plot_num = f"Plot_{i+1}"  # Default if no plot number found
+                # Use actual plot number if available, otherwise use index
+                plot_num = plot.get('plot_number', f"Plot_{i+1}")
                 print(f"{i+1:<6} {plot_num:<12} {plot['area'] * (self.scale_factor ** 2):<15.2f} "
                       f"{plot['perimeter'] * self.scale_factor:<15.2f} {plot['type']:<12} {plot['layer']:<20}")
             
