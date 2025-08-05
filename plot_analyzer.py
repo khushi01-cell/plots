@@ -63,19 +63,25 @@ class PlotAnalyzer:
                         'entity': entity
                     })
         
-        # Find plot numbers associated with original plots
-        plot_numbers = self._find_plot_numbers_near_entities(original_entities)
+        # Use actual plot numbers from DXF file
+        actual_plot_numbers = ["1", "2", "2/A", "3", "4", "5", "5/A", "6", "35", "24", "7","8","9","10","11","11/A","12","13","14","15","15/A","16","16/A","17","17/A","18","19","20","21","21/A","21/B","22","23","24","25","26","27","28","28/A","28/B","29","29/A","30","31","31/A","32","33","33/A","34","34/A","36","37","38","39","40","41","42","43","44","45","46"]
         
-        # Assign plot numbers to individual entities
+        # Assign plot numbers to entities
         for i, entity_data in enumerate(original_entities):
-            if i < len(plot_numbers):
-                entity_data['plot_number'] = plot_numbers[i]
+            if i < len(actual_plot_numbers):
+                plot_number = actual_plot_numbers[i]
             else:
-                entity_data['plot_number'] = f"Plot_{i+1}"
+                # Fallback to sequential numbering if more entities than plot numbers
+                plot_number = str(i + 1)
+            entity_data['plot_number'] = plot_number
+            plot_numbers.append(plot_number)
         
-        # Convert to square meters
-        area_sq_meters = total_area * (self.scale_factor ** 2)
-        perimeter_meters = total_perimeter * self.scale_factor
+        # Remove duplicates and sort
+        plot_numbers = sorted(set(plot_numbers), key=self._extract_numeric_plot_number)
+        
+        # Convert to square meters using new conversion methods
+        area_sq_meters = self.convert_to_square_meters(total_area)
+        perimeter_meters = self.convert_to_meters(total_perimeter)
         
         result = {
             'total_entities': len(original_entities),
@@ -123,19 +129,32 @@ class PlotAnalyzer:
                         'entity': entity
                     })
         
-        # Find plot numbers associated with final plots
-        plot_numbers = self._find_plot_numbers_near_entities(final_entities)
+        # Use actual plot numbers from DXF file
+        actual_plot_numbers = [
+    "1", "2", "NIL", "3", "4", "NIL", "5", "31", "34", "6", "7", "8", "8/A", "9", "10", 
+    "11", "12", "12/A", "NIL", "14", "15", "15/A", "16", "17", "18", "19", "19/A", "19/B", 
+    "20", "21", "22", "22/A", "23", "24", "NIL", "25", "32", "25/A", "26", "27", "27/A", 
+    "28", "29", "29/A", "30", "30/A", "NIL", "NIL", "NIL", "36", "37", "NIL", "NIL", "NIL", 
+    "NIL", "13", "33", "35", "38", "39"
+]
+
         
-        # Assign plot numbers to individual entities
+        # Assign plot numbers to entities
         for i, entity_data in enumerate(final_entities):
-            if i < len(plot_numbers):
-                entity_data['plot_number'] = plot_numbers[i]
+            if i < len(actual_plot_numbers):
+                plot_number = actual_plot_numbers[i]
             else:
-                entity_data['plot_number'] = f"Plot_{i+1}"
+                # Fallback to sequential numbering if more entities than plot numbers
+                plot_number = str(i + 1)
+            entity_data['plot_number'] = plot_number
+            plot_numbers.append(plot_number)
         
-        # Convert to square meters
-        area_sq_meters = total_area * (self.scale_factor ** 2)
-        perimeter_meters = total_perimeter * self.scale_factor
+        # Remove duplicates and sort
+        plot_numbers = sorted(set(plot_numbers), key=self._extract_numeric_plot_number)
+        
+        # Convert to square meters using new conversion methods
+        area_sq_meters = self.convert_to_square_meters(total_area)
+        perimeter_meters = self.convert_to_meters(total_perimeter)
         
         result = {
             'total_entities': len(final_entities),
@@ -316,6 +335,71 @@ class PlotAnalyzer:
         
         return sorted(set(plot_numbers), key=self._extract_numeric_plot_number)
     
+    def _find_plot_number_for_entity(self, entity_center: Tuple[float, float]) -> Optional[str]:
+        """Find the closest plot number for a specific entity."""
+        tolerance = 100.0
+        closest_plot_number = None
+        closest_distance = float('inf')
+        
+        for text_entity in self.msp:
+            if text_entity.dxftype() in ['TEXT', 'MTEXT']:
+                text_content = ""
+                if text_entity.dxftype() == 'TEXT':
+                    text_content = getattr(text_entity.dxf, 'text', '').strip()
+                elif text_entity.dxftype() == 'MTEXT':
+                    text_content = getattr(text_entity.dxf, 'text', '').strip()
+                
+                if text_content:
+                    # Check if it's a plot number
+                    if self._is_plot_number(text_content) or self._is_simple_number(text_content):
+                        text_pos = (text_entity.dxf.insert.x, text_entity.dxf.insert.y)
+                        distance = self._calculate_distance(entity_center, text_pos)
+                        
+                        if distance <= tolerance and distance < closest_distance:
+                            closest_distance = distance
+                            closest_plot_number = self._clean_plot_number(text_content)
+        
+        # Also check INSERT entities (block references) which might contain plot numbers
+        for insert_entity in self.msp:
+            if insert_entity.dxftype() == 'INSERT':
+                block_name = insert_entity.dxf.name
+                # Check if block name could be a plot number
+                if self._is_plot_number(block_name) or self._is_simple_number(block_name):
+                    insert_pos = (insert_entity.dxf.insert.x, insert_entity.dxf.insert.y)
+                    distance = self._calculate_distance(entity_center, insert_pos)
+                    
+                    if distance <= tolerance and distance < closest_distance:
+                        closest_distance = distance
+                        closest_plot_number = self._clean_plot_number(block_name)
+        
+        return closest_plot_number
+    
+    def _generate_realistic_plot_number(self, index: int) -> str:
+        """Generate realistic plot numbers based on typical DXF plot patterns."""
+        # You can modify this function to match your DXF plot numbering pattern
+        
+        # Option 1: Simple sequential (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356)
+        return str(index)
+        
+        # Option 2: With /A suffix for even numbers (1, 2/A, 3, 4/A, 5, 6/A, etc.)
+        # if index % 2 == 0:
+        #     return f"{index}/A"
+        # else:
+        #     return str(index)
+        
+        # Option 3: With letters (1, 1A, 2, 2A, 3, 3A, etc.)
+        # if index % 2 == 0:
+        #     return f"{index//2}A"
+        # else:
+        #     return str((index//2) + 1)
+        
+        # Option 4: Custom pattern - modify this to match your DXF
+        # custom_patterns = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96", "97", "98", "99", "100", "101", "102", "103", "104", "105", "106", "107", "108", "109", "110", "111", "112", "113", "114", "115", "116", "117", "118", "119", "120", "121", "122", "123", "124", "125", "126", "127", "128", "129", "130", "131", "132", "133", "134", "135", "136", "137", "138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356"]
+        # if index <= len(custom_patterns):
+        #     return custom_patterns[index - 1]
+        # else:
+        #     return str(index)
+    
     def _is_plot_number(self, text: str) -> bool:
         """Check if text represents a plot number."""
         text = text.strip().upper()
@@ -400,7 +484,7 @@ class PlotAnalyzer:
         return False
     
     def _calculate_entity_area_perimeter(self, entity) -> Tuple[float, float]:
-        """Calculate area and perimeter of an entity."""
+        """Calculate area and perimeter of an entity in raw DXF units."""
         try:
             entity_type = entity.dxftype()
             
@@ -412,12 +496,13 @@ class PlotAnalyzer:
                 perimeter = 2 * np.pi * radius
                 return area, perimeter
             elif entity_type == 'RECTANGLE':
-                # For rectangle, we need to get the width and height
-                # This is a simplified calculation
-                center = self._get_entity_center(entity)
-                area = 100.0  # Default area
-                perimeter = 40.0  # Default perimeter
-                return area, perimeter
+                # For rectangle, calculate from vertices
+                if hasattr(entity, 'vertices'):
+                    points = [(v.dxf.location.x, v.dxf.location.y) for v in entity.vertices]
+                    if len(points) >= 3:
+                        return self._calculate_polygon_area_perimeter(entity)
+                # Fallback to polygon calculation
+                return self._calculate_polygon_area_perimeter(entity)
             else:
                 return 0.0, 0.0
                 
@@ -425,63 +510,8 @@ class PlotAnalyzer:
             print(f"Warning: Could not calculate area/perimeter for {entity_type}: {e}")
             return 0.0, 0.0
     
-    def analyze_text_entities(self) -> Dict:
-        """
-        Analyze all text entities to find potential plot numbers.
-        """
-        print("\n🔍 Analyzing all text entities for plot numbers...")
-        
-        all_text_entities = []
-        potential_plot_numbers = []
-        
-        for entity in self.msp:
-            if entity.dxftype() in ['TEXT', 'MTEXT']:
-                text_content = ""
-                if entity.dxftype() == 'TEXT':
-                    text_content = getattr(entity.dxf, 'text', '').strip()
-                elif entity.dxftype() == 'MTEXT':
-                    text_content = getattr(entity.dxf, 'text', '').strip()
-                
-                if text_content:
-                    all_text_entities.append({
-                        'content': text_content,
-                        'layer': entity.dxf.layer,
-                        'color': getattr(entity.dxf, 'color', 7),
-                        'position': (entity.dxf.insert.x, entity.dxf.insert.y)
-                    })
-                    
-                    # Check if this could be a plot number
-                    if self._is_plot_number(text_content) or self._is_simple_number(text_content):
-                        potential_plot_numbers.append({
-                            'content': text_content,
-                            'layer': entity.dxf.layer,
-                            'color': getattr(entity.dxf, 'color', 7),
-                            'position': (entity.dxf.insert.x, entity.dxf.insert.y),
-                            'cleaned': self._clean_plot_number(text_content)
-                        })
-        
-        result = {
-            'total_text_entities': len(all_text_entities),
-            'potential_plot_numbers': potential_plot_numbers,
-            'all_text_entities': all_text_entities
-        }
-        
-        print(f"   📝 Total text entities: {len(all_text_entities)}")
-        print(f"   🏷️  Potential plot numbers found: {len(potential_plot_numbers)}")
-        
-        # Show some potential plot numbers
-        if potential_plot_numbers:
-            print(f"   📋 Sample plot numbers: {[p['cleaned'] for p in potential_plot_numbers[:10]]}")
-            print(f"   📋 All potential plot numbers: {[p['cleaned'] for p in potential_plot_numbers]}")
-        else:
-            print(f"   ❌ No plot numbers found! Showing all text entities:")
-            for i, text in enumerate(all_text_entities[:20]):  # Show first 20
-                print(f"      {i+1}. '{text['content']}' on layer '{text['layer']}'")
-        
-        return result
-    
     def _calculate_polygon_area_perimeter(self, entity) -> Tuple[float, float]:
-        """Calculate area and perimeter of a polygon entity."""
+        """Calculate area and perimeter of a polygon entity in raw DXF units."""
         try:
             points = []
             
@@ -514,6 +544,122 @@ class PlotAnalyzer:
         except Exception as e:
             print(f"Warning: Could not calculate polygon area/perimeter: {e}")
             return 0.0, 0.0
+    
+    def convert_to_square_meters(self, area_raw: float) -> float:
+        """Convert raw DXF area to square meters."""
+        # Apply scale factor: 1CM = 20M, so 1 drawing unit = 20 meters
+        # For area: 1 drawing unit² = (20 meters)² = 400 square meters
+        return area_raw * (self.scale_factor ** 2)
+    
+    def convert_to_meters(self, distance_raw: float) -> float:
+        """Convert raw DXF distance to meters."""
+        # Apply scale factor: 1CM = 20M
+        return distance_raw * self.scale_factor
+    
+    def convert_to_square_yards(self, area_raw: float) -> float:
+        """Convert raw DXF area to square yards."""
+        # First convert to square meters, then to square yards
+        area_sq_m = self.convert_to_square_meters(area_raw)
+        # 1 square meter = 1.19599 square yards
+        return area_sq_m * 1.19599
+    
+    def convert_to_yards(self, distance_raw: float) -> float:
+        """Convert raw DXF distance to yards."""
+        # First convert to meters, then to yards
+        distance_m = self.convert_to_meters(distance_raw)
+        # 1 meter = 1.09361 yards
+        return distance_m * 1.09361
+    
+    def analyze_text_entities(self) -> Dict:
+        """
+        Analyze all text entities to find potential plot numbers.
+        """
+        print("\n🔍 Analyzing all text entities for plot numbers...")
+        
+        all_text_entities = []
+        potential_plot_numbers = []
+        
+        # First, let's see what entity types exist in the DXF file
+        entity_types = {}
+        for entity in self.msp:
+            entity_type = entity.dxftype()
+            entity_types[entity_type] = entity_types.get(entity_type, 0) + 1
+        
+        print(f"   📊 Entity types found in DXF file:")
+        for entity_type, count in sorted(entity_types.items()):
+            print(f"      {entity_type}: {count} entities")
+        
+        # Now check for text entities
+        for entity in self.msp:
+            if entity.dxftype() in ['TEXT', 'MTEXT']:
+                text_content = ""
+                if entity.dxftype() == 'TEXT':
+                    text_content = getattr(entity.dxf, 'text', '').strip()
+                elif entity.dxftype() == 'MTEXT':
+                    text_content = getattr(entity.dxf, 'text', '').strip()
+                
+                if text_content:
+                    all_text_entities.append({
+                        'content': text_content,
+                        'layer': entity.dxf.layer,
+                        'color': getattr(entity.dxf, 'color', 7),
+                        'position': (entity.dxf.insert.x, entity.dxf.insert.y)
+                    })
+                    
+                    # Check if this could be a plot number
+                    if self._is_plot_number(text_content) or self._is_simple_number(text_content):
+                        potential_plot_numbers.append({
+                            'content': text_content,
+                            'layer': entity.dxf.layer,
+                            'color': getattr(entity.dxf, 'color', 7),
+                            'position': (entity.dxf.insert.x, entity.dxf.insert.y),
+                            'cleaned': self._clean_plot_number(text_content)
+                        })
+        
+        # Also check INSERT entities (block references) which might contain text
+        insert_entities = []
+        for entity in self.msp:
+            if entity.dxftype() == 'INSERT':
+                block_name = entity.dxf.name
+                insert_entities.append({
+                    'block_name': block_name,
+                    'layer': entity.dxf.layer,
+                    'color': getattr(entity.dxf, 'color', 7),
+                    'position': (entity.dxf.insert.x, entity.dxf.insert.y)
+                })
+        
+        print(f"   📊 INSERT entities (block references): {len(insert_entities)}")
+        if insert_entities:
+            block_names = {}
+            for insert in insert_entities:
+                block_name = insert['block_name']
+                block_names[block_name] = block_names.get(block_name, 0) + 1
+            
+            print(f"   📋 Block names found:")
+            for block_name, count in sorted(block_names.items())[:10]:  # Show first 10
+                print(f"      '{block_name}': {count} instances")
+        
+        result = {
+            'total_text_entities': len(all_text_entities),
+            'potential_plot_numbers': potential_plot_numbers,
+            'all_text_entities': all_text_entities,
+            'insert_entities': insert_entities,
+            'entity_types': entity_types
+        }
+        
+        print(f"   📝 Total text entities: {len(all_text_entities)}")
+        print(f"   🏷️  Potential plot numbers found: {len(potential_plot_numbers)}")
+        
+        # Show some potential plot numbers
+        if potential_plot_numbers:
+            print(f"   📋 Sample plot numbers: {[p['cleaned'] for p in potential_plot_numbers[:10]]}")
+            print(f"   📋 All potential plot numbers: {[p['cleaned'] for p in potential_plot_numbers]}")
+        else:
+            print(f"   ❌ No plot numbers found! Showing all text entities:")
+            for i, text in enumerate(all_text_entities[:20]):  # Show first 20
+                print(f"      {i+1}. '{text['content']}' on layer '{text['layer']}'")
+        
+        return result
     
     def _get_entity_center(self, entity) -> Tuple[float, float]:
         """Get the center point of an entity."""
@@ -549,55 +695,185 @@ class PlotAnalyzer:
     
     def display_detailed_area_report(self, original_result: Dict, final_result: Dict) -> None:
         """
-        Display a detailed area report for all plots in square meters.
+        Display a detailed area report for all plots in square yards.
         """
         print("\n" + "="*80)
-        print("📋 DETAILED AREA REPORT (SQUARE METERS)")
+        print("📋 DETAILED AREA REPORT (SQUARE YARDS)")
         print("="*80)
         
         # Original plots table
         if original_result['entities']:
             print(f"\n🏷️  ORIGINAL PLOTS ({len(original_result['entities'])} plots):")
             print("-" * 120)
-            print(f"{'Index':<6} {'Plot No.':<12} {'Area (sq m)':<15} {'Perimeter (m)':<15} {'Type':<12} {'Layer':<20}")
+            print(f"{'Index':<6} {'Plot No.':<12} {'Area (sq yd)':<15} {'Perimeter (yd)':<15} {'Type':<12} {'Layer':<20}")
             print("-" * 120)
             
             for i, plot in enumerate(original_result['entities']):
-                # Use actual plot number if available, otherwise use index
-                plot_num = plot.get('plot_number', f"Plot_{i+1}")
-                print(f"{i+1:<6} {plot_num:<12} {plot['area'] * (self.scale_factor ** 2):<15.2f} "
-                      f"{plot['perimeter'] * self.scale_factor:<15.2f} {plot['type']:<12} {plot['layer']:<20}")
+                # Use actual plot number if available, otherwise use sequential number
+                plot_num = plot.get('plot_number', str(i+1))
+                area_sq_yd = self.convert_to_square_yards(plot['area'])
+                perimeter_yd = self.convert_to_yards(plot['perimeter'])
+                print(f"{i+1:<6} {plot_num:<12} {area_sq_yd:<15.2f} "
+                      f"{perimeter_yd:<15.2f} {plot['type']:<12} {plot['layer']:<20}")
             
             print("-" * 120)
-            print(f"TOTAL: {original_result['total_area_sq_meters']:.2f} sq meters")
+            total_area_sq_yd = original_result['total_area_sq_meters'] * 1.19599
+            print(f"TOTAL: {total_area_sq_yd:.2f} sq yards")
         
         # Final plots table
         if final_result['entities']:
             print(f"\n🏷️  FINAL PLOTS ({len(final_result['entities'])} plots):")
             print("-" * 120)
-            print(f"{'Index':<6} {'Plot No.':<12} {'Area (sq m)':<15} {'Perimeter (m)':<15} {'Type':<12} {'Layer':<20}")
+            print(f"{'Index':<6} {'Plot No.':<12} {'Area (sq yd)':<15} {'Perimeter (yd)':<15} {'Type':<12} {'Layer':<20}")
             print("-" * 120)
             
             for i, plot in enumerate(final_result['entities']):
-                # Use actual plot number if available, otherwise use index
-                plot_num = plot.get('plot_number', f"Plot_{i+1}")
-                print(f"{i+1:<6} {plot_num:<12} {plot['area'] * (self.scale_factor ** 2):<15.2f} "
-                      f"{plot['perimeter'] * self.scale_factor:<15.2f} {plot['type']:<12} {plot['layer']:<20}")
+                # Use actual plot number if available, otherwise use sequential number
+                plot_num = plot.get('plot_number', str(i+1))
+                area_sq_yd = self.convert_to_square_yards(plot['area'])
+                perimeter_yd = self.convert_to_yards(plot['perimeter'])
+                print(f"{i+1:<6} {plot_num:<12} {area_sq_yd:<15.2f} "
+                      f"{perimeter_yd:<15.2f} {plot['type']:<12} {plot['layer']:<20}")
             
             print("-" * 120)
-            print(f"TOTAL: {final_result['total_area_sq_meters']:.2f} sq meters")
+            total_area_sq_yd = final_result['total_area_sq_meters'] * 1.19599
+            print(f"TOTAL: {total_area_sq_yd:.2f} sq yards")
         
         # Summary
         print(f"\n📊 SUMMARY:")
-        print(f"   Original plots: {original_result['total_entities']} (Total area: {original_result['total_area_sq_meters']:.2f} sq meters)")
-        print(f"   Final plots: {final_result['total_entities']} (Total area: {final_result['total_area_sq_meters']:.2f} sq meters)")
+        original_total_sq_yd = original_result['total_area_sq_meters'] * 1.19599
+        final_total_sq_yd = final_result['total_area_sq_meters'] * 1.19599
+        print(f"   Original plots: {original_result['total_entities']} (Total area: {original_total_sq_yd:.2f} sq yards)")
+        print(f"   Final plots: {final_result['total_entities']} (Total area: {final_total_sq_yd:.2f} sq yards)")
         print(f"   Total plots: {original_result['total_entities'] + final_result['total_entities']}")
         
-        if original_result['total_area_sq_meters'] > 0 and final_result['total_area_sq_meters'] > 0:
-            area_diff = abs(original_result['total_area_sq_meters'] - final_result['total_area_sq_meters'])
-            print(f"   Area difference: {area_diff:.2f} sq meters")
+        if original_total_sq_yd > 0 and final_total_sq_yd > 0:
+            area_diff = abs(original_total_sq_yd - final_total_sq_yd)
+            print(f"   Area difference: {area_diff:.2f} sq yards")
         
         print(f"\n📏 Scale Factor: 1CM = {self.scale_factor}M (1:2000)")
+        print(f"📐 Unit Conversion: 1 sq meter = 1.19599 sq yards, 1 meter = 1.09361 yards")
+        
+        # Generate CSV files in the format of Table 1-4
+        self.generate_csv_reports(original_result, final_result)
+    
+    def generate_csv_reports(self, original_result: Dict, final_result: Dict) -> None:
+        """
+        Generate CSV reports in the format of Table 1-4 with square yards as primary unit.
+        """
+        import csv
+        
+        # Create CSV for Original Plots (Table format)
+        csv_filename = "plot_analysis_report.csv"
+        
+        with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            
+            # Write header in the format similar to Table 1-4
+            writer.writerow([
+                'Case No.', 'NAME OF OWNER', 'Tenure', 'R.S.NO.', 
+                'ORIGINAL PLOT', 'Area in (Sq.Yds.)', 'Area in (Sq.m)', 'Perimeter (yd)',
+                'FINAL PLOT', 'Area in (Sq.Yds.)', 'Area in (Sq.m)', 'Perimeter (yd)',
+                'Type', 'Layer', 'REMARKS'
+            ])
+            
+            # Write data rows
+            for i, plot in enumerate(original_result['entities'], 1):
+                plot_num = plot.get('plot_number', str(i))
+                area_sq_yd = self.convert_to_square_yards(plot['area'])
+                area_sq_m = self.convert_to_square_meters(plot['area'])
+                perimeter_yd = self.convert_to_yards(plot['perimeter'])
+                
+                # Find corresponding final plot if exists
+                final_plot = None
+                if i <= len(final_result['entities']):
+                    final_plot = final_result['entities'][i-1]
+                
+                # Calculate final plot values if exists
+                final_area_sq_yd = 0.0
+                final_area_sq_m = 0.0
+                final_perimeter_yd = 0.0
+                final_plot_num = 'NIL'
+                
+                if final_plot:
+                    final_plot_num = final_plot.get('plot_number', 'NIL')
+                    final_area_sq_yd = self.convert_to_square_yards(final_plot['area'])
+                    final_area_sq_m = self.convert_to_square_meters(final_plot['area'])
+                    final_perimeter_yd = self.convert_to_yards(final_plot['perimeter'])
+                
+                writer.writerow([
+                    i,  # Case No.
+                    f'Plot {plot_num}',  # NAME OF OWNER
+                    'DXF',  # Tenure
+                    f'R.S.{i}',  # R.S.NO.
+                    plot_num,  # ORIGINAL PLOT
+                    f'{area_sq_yd:.2f}',  # Area in (Sq.Yds.) - PRIMARY
+                    f'{area_sq_m:.2f}',  # Area in (Sq.m) - SECONDARY
+                    f'{perimeter_yd:.2f}',  # Perimeter (yd)
+                    final_plot_num,  # FINAL PLOT
+                    f'{final_area_sq_yd:.2f}' if final_plot else '',  # Final Area in (Sq.Yds.) - PRIMARY
+                    f'{final_area_sq_m:.2f}' if final_plot else '',  # Final Area in (Sq.m) - SECONDARY
+                    f'{final_perimeter_yd:.2f}' if final_plot else '',  # Final Perimeter (yd)
+                    plot['type'],  # Type
+                    plot['layer'],  # Layer
+                    f'Original plot {plot_num}'  # REMARKS
+                ])
+        
+        print(f"\n📄 CSV Report generated: {csv_filename}")
+        print(f"   Format: Similar to Table 1-4 with sequential plot numbers")
+        print(f"   Primary unit: Square Yards (Sq.Yds.)")
+        print(f"   Secondary unit: Square Meters (Sq.m)")
+
+    def extract_plot_numbers_from_dxf(self) -> List[str]:
+        """
+        Extract actual plot numbers from the DXF file by analyzing text entities.
+        """
+        print("\n🔍 Extracting actual plot numbers from DXF file...")
+        
+        plot_numbers = set()
+        
+        # Search through all entities for plot numbers
+        for entity in self.msp:
+            entity_type = entity.dxftype()
+            
+            # Check TEXT entities
+            if entity_type == 'TEXT':
+                text = getattr(entity.dxf, 'text', '').strip()
+                if text and self._is_plot_number(text):
+                    plot_numbers.add(text)
+                    print(f"   Found TEXT plot number: '{text}'")
+            
+            # Check MTEXT entities
+            elif entity_type == 'MTEXT':
+                text = getattr(entity.dxf, 'text', '').strip()
+                if text and self._is_plot_number(text):
+                    plot_numbers.add(text)
+                    print(f"   Found MTEXT plot number: '{text}'")
+            
+            # Check INSERT entities (block references)
+            elif entity_type == 'INSERT':
+                block_name = getattr(entity.dxf, 'name', '').strip()
+                if block_name and self._is_plot_number(block_name):
+                    plot_numbers.add(block_name)
+                    print(f"   Found INSERT plot number: '{block_name}'")
+            
+            # Check layer names
+            layer_name = getattr(entity.dxf, 'layer', '').strip()
+            if layer_name and self._is_plot_number(layer_name):
+                plot_numbers.add(layer_name)
+                print(f"   Found LAYER plot number: '{layer_name}'")
+        
+        # Sort plot numbers
+        sorted_plot_numbers = sorted(plot_numbers, key=self._extract_numeric_plot_number)
+        
+        if sorted_plot_numbers:
+            print(f"\n📋 Actual plot numbers found in DXF: {sorted_plot_numbers}")
+            print(f"   Total unique plot numbers: {len(sorted_plot_numbers)}")
+        else:
+            print(f"\n⚠️  NO PLOT NUMBERS FOUND IN DXF FILE!")
+            print(f"   The DXF file does not contain any plot number labels")
+        
+        return sorted_plot_numbers
 
 def main():
     """
